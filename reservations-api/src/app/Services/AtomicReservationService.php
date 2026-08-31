@@ -10,43 +10,19 @@ use App\Models\Reservation;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Reserva de stock atomica e idempotente. El detalle de las decisiones
+ * (lock pesimista, attempts: 1, manejo del duplicado) esta en README.md y
+ * prompts.md.
+ */
 final class AtomicReservationService implements ReservationStrategy
 {
     public function reserve(string $requestId, int $productId, int $quantity): ReservationResult
     {
         try {
-            /*
-             * attempts: 1 -- sin reintento, y es una decision, no un descuido:
-             *
-             *  - Deadlock (1213): no se puede construir un ciclo de espera con
-             *    el esquema actual. Cada transaccion adquiere sus locks de un
-             *    solo golpe -- la unica espera bloqueante es el SELECT ... FOR
-             *    UPDATE inicial -- y despues solo escribe sobre la fila que ya
-             *    posee o sobre registros de indice nuevos; nunca vuelve a
-             *    esperar por un segundo recurso. (Ojo: si el producto NO existe,
-             *    el locking read no bloquea una fila por PK sino que toma un GAP
-             *    lock; los gap locks son mutuamente compatibles, asi que dos
-             *    404 concurrentes tampoco se cruzan.) Esto deja de valer si
-             *    entran reservas multi-linea, un alta de productos o un FOR
-             *    UPDATE sobre indice secundario: habria que ordenar los locks y
-             *    reconsiderar attempts. Como red, el handler HTTP mapea tambien
-             *    1213 -> 503 en vez de dejarlo salir como 500.
-             *  - Lock wait timeout (1205) si puede darse (innodb_lock_wait_timeout
-             *    esta fijado en 10s en el compose). Reintentar solo alargaria la
-             *    espera de un cliente que ya lleva 10s bloqueado; preferimos
-             *    devolver el control ya. El handler HTTP lo traduce a 503 +
-             *    Retry-After para que el cliente reintente cuando quiera.
-             */
             $reservation = DB::transaction(function () use ($requestId, $productId, $quantity) {
-                /*
-                 * SELECT ... FOR UPDATE (lockForUpdate). Bajo REPEATABLE READ un
-                 * SELECT normal leeria el snapshot de la transaccion y podria
-                 * quedar obsoleto; el locking read lee la ultima version
-                 * committeada y ademas retiene un lock exclusivo sobre la fila
-                 * hasta el COMMIT. Por eso el $stock leido aqui sigue siendo el
-                 * valor real cuando escribimos la reserva mas abajo: nadie mas
-                 * puede tocar esa fila mientras tanto.
-                 */
+                // Lock exclusivo de la fila hasta el COMMIT: $stock sigue siendo
+                // el valor real cuando se escribe la reserva.
                 $product = Product::query()->lockForUpdate()->find($productId);
 
                 if ($product === null) {
@@ -58,21 +34,12 @@ final class AtomicReservationService implements ReservationStrategy
                 if ($stock >= $quantity) {
                     $remaining = $stock - $quantity;
 
-                    // Escribimos el valor ya calculado (no `stock - quantity` en
-                    // SQL): asi queda explicito que products.stock y
-                    // reservations.remaining_stock salen del mismo numero.
-                    // saveOrFail: es la unica escritura que sostiene el invariante
-                    // de no-sobreventa; si no persiste, la transaccion revienta y
-                    // hace rollback en vez de crear una reserva confirmada sin
-                    // decremento.
                     $product->stock = $remaining;
                     $product->saveOrFail();
 
                     $status = ReservationStatus::Confirmed;
                 } else {
-                    // Stock insuficiente: el producto no se toca. Persistimos la
-                    // reserva rechazada con el stock real (leido bajo el lock)
-                    // para que el endpoint sea idempotente tambien en el fallo.
+                    // Stock insuficiente: el producto no se toca.
                     $remaining = $stock;
                     $status = ReservationStatus::Rejected;
                 }
@@ -88,15 +55,8 @@ final class AtomicReservationService implements ReservationStrategy
 
             return new ReservationResult($reservation, wasReplay: false);
         } catch (UniqueConstraintViolationException) {
-            /*
-             * Otra transaccion con el mismo request_id gano la carrera (o es un
-             * reintento del cliente). El INSERT de arriba se bloqueo contra el
-             * indice UNIQUE hasta que la ganadora hizo COMMIT, y entonces obtuvo
-             * el 1062; DB::transaction ya hizo rollback, deshaciendo el decremento
-             * de esta transaccion. La leemos FUERA de la transaccion abortada:
-             * hace falta un snapshot nuevo para ver la fila que la ganadora
-             * dejo committeada.
-             */
+            // request_id ya usado: reintento del cliente o carrera perdida.
+            // Se resuelve fuera de la transaccion abortada.
             return $this->replay($requestId, $productId, $quantity);
         }
     }
