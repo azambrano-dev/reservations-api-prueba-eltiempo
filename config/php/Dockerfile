@@ -21,5 +21,9 @@ RUN groupadd -g "1000" app 2>/dev/null || true \
 
 WORKDIR /var/www/html
 
+COPY ./docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 9000
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["php-fpm"]

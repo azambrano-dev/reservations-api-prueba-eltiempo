@@ -37,6 +37,10 @@ services:
   mysql_reservations:
     image: mysql:8.4
     container_name: mysql-reservations
+    command:
+      - --innodb-lock-wait-timeout=10
+      - --max-connections=200
+      - --general-log=OFF
     ports:
       - "3310:3306"
     env_file:
@@ -45,6 +49,12 @@ services:
       - type: volume
         source: mysql_reservations
         target: /var/lib/mysql
+      # Crea la base de datos de test y le da acceso al usuario de la app.
+      # Solo se ejecuta en el primer arranque (volumen vacio).
+      - type: bind
+        source: ./config/mysql/initdb
+        target: /docker-entrypoint-initdb.d
+    networks: [reservations]
 
 volumes:
   mysql_reservations:
