@@ -1,0 +1,54 @@
+services: 
+  
+  # Init service PHP/Laravel
+  api_reservations:
+    build: ./config/php
+    container_name: api-reservations
+    ports:
+      - "9010:9000"
+    env_file:
+      - ./config/php/.env
+    volumes:
+      - type: bind
+        source: ./config/php/www.conf
+        target: /usr/local/etc/php-fpm.d/www.conf
+      - type: bind
+        source: ./reservations-api/src
+        target: /var/www/html
+    depends_on:
+      - mysql_reservations
+    networks: [reservations]
+
+  # Init service Nginx
+  nginx_reservations:
+    build: config/nginx
+    container_name: nginx-reservations
+    ports:
+      - "8010:80"
+    volumes:
+      - type: bind
+        source: ./reservations-api/src
+        target: /var/www/html
+    depends_on:
+      - api_reservations
+    networks: [reservations]
+  
+  # Init service MySQL
+  mysql_reservations:
+    image: mysql:8.4
+    container_name: mysql-reservations
+    ports:
+      - "3310:3306"
+    env_file:
+      - ./config/mysql/.env
+    volumes:
+      - type: volume
+        source: mysql_reservations
+        target: /var/lib/mysql
+
+volumes:
+  mysql_reservations:
+
+networks:
+  reservations:
+    driver: bridge
