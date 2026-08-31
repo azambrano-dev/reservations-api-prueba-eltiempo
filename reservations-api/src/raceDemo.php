@@ -14,10 +14,8 @@
  * 
  *  Para ejecutar la prueba, se puede usar los siguientes comandos:
  * 
- *  1. ´php raceDemo.php´
- *  2. ´sudo docker compose exec api_reservations php raceDemo.php´
- *  3. ´php raceDemo.php --implementation=naive --delay=50´
- *  4. ´sudo docker compose exec api_reservations php raceDemo.php --implementation=naive --delay=50´ 
+ *  1. ´sudo docker compose exec api_reservations php raceDemo.php´
+ *  3. ´sudo docker compose exec api_reservations php raceDemo.php --implementation=naive --delay=50´ 
  * 
 */
 
@@ -77,8 +75,8 @@ for ( $i = 0; $i < $workers; $i++ )
             'status' => $reservation->status->value,
             'remaining_stock' => $reservation->remaining_stock,
         ];
-        echo "Reserva exitosa: Worker: {$i}, ID {$reservation->id}, Estado: {$reservation->status}, Stock restante: {$reservation->remaining_stock}\n";
-    } catch ( \Exception $e ) {
+        echo "Reserva exitosa: Worker: {$i}, ID {$reservation->id}, Estado: {$reservation->status->value}, Stock restante: {$reservation->remaining_stock}\n";
+    } catch ( \Throwable $e ) {
         $output = [
             'worker' => $i,
             'status' => 'error',
