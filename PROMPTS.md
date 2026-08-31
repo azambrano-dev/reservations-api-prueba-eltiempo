@@ -344,3 +344,8 @@ Los hallazgos vemos que cayeron más en el mapeo de los errores, límites de ent
 ### 9. El detector del `remaining_stock` acoplado a `quantity >= 1` -> *RECHAZADA*
 **Motivo:** El acoplamiento existe, pero es con una regla del contrato, no con un detalle de implementación. El *min:1* lo dejo allí por mantener lo que pide el enunciado de la prueba y no porque viniera bien. Adcional el escenario que plantea el model de *"relajar a min:0"* la regla no va a pasar puesto que una reserva de 0 unidades no significaria nada.
 
+
+## Promt 5/Final - Ejecución de hallazgos aceptados.
+```bash
+Ejecuta las correciones dadas solo para los hallazgos 1. quantity sin cota sueprior, 2. Mapear el 1213 a HTTP 503, 3. Corregir el cometnario por estética del Gap Lock, 4. El saveOrFail y la 6. el finally en la limpieza del arnés. Los demás hallazgos quedan como rechazaos  por decisión y criterio propio.
+```

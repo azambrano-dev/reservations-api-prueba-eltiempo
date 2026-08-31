@@ -42,15 +42,27 @@ return Application::configure(basePath: dirname(__DIR__))
             );
         });
 
-        // MySQL 1205 = lock wait timeout. Con attempts:1 no reintentamos: 503 y
-        // que el cliente decida cuando volver a intentarlo.
+        // Contencion de InnoDB que el cliente puede resolver reintentando:
+        //   1205 = lock wait timeout (innodb_lock_wait_timeout, 10s en compose).
+        //   1213 = deadlock. El analisis dice que no puede darse con el esquema
+        //          actual, pero attempts:1 no deja red: un cambio de esquema
+        //          (reservas multilinea, alta de productos, un FOR UPDATE sobre
+        //          indice secundario) podria reintroducirlo. Mismo remedio de
+        //          cliente que el 1205, asi que mismo 503 + Retry-After en vez
+        //          de un 500 sin diagnostico. No se sube attempts: reintentar
+        //          tambien absorberia el 1205, justo lo que se quiere evitar.
         $exceptions->render(function (QueryException $e, Request $request) {
-            if (! $request->is('api/*') || ($e->errorInfo[1] ?? null) !== 1205) {
+            $code = $e->errorInfo[1] ?? null;
+
+            if (! $request->is('api/*') || ! in_array($code, [1205, 1213], true)) {
                 return null;
             }
 
             return response()->json(
-                ['error' => ['code' => 'lock_timeout', 'message' => 'The product is busy, please retry later.']],
+                ['error' => [
+                    'code' => $code === 1213 ? 'deadlock' : 'lock_timeout',
+                    'message' => 'The product is busy, please retry later.',
+                ]],
                 503,
             )->header('Retry-After', '1');
         });

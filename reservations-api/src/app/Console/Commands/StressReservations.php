@@ -63,99 +63,105 @@ class StressReservations extends Command
             $createdProduct = true;
         }
 
-        $sharedRequestId = (string) Str::uuid();
-        $payloads = [];
-        for ($i = 0; $i < $concurrency; $i++) {
-            $payloads[] = [
-                'request_id' => $sameRequestId ? $sharedRequestId : (string) Str::uuid(),
-                'product_id' => $product->id,
-                'quantity' => $quantity,
+        try {
+            $sharedRequestId = (string) Str::uuid();
+            $payloads = [];
+            for ($i = 0; $i < $concurrency; $i++) {
+                $payloads[] = [
+                    'request_id' => $sameRequestId ? $sharedRequestId : (string) Str::uuid(),
+                    'product_id' => $product->id,
+                    'quantity' => $quantity,
+                ];
+            }
+
+            $httpCodes = $this->fire($baseUrl, $payloads, $strategy, $raceDelay);
+
+            // Estado final, leido con una conexion limpia (fuera de cualquier tx).
+            $product->refresh();
+            $confirmed = Reservation::query()
+                ->where('product_id', $product->id)
+                ->where('status', ReservationStatus::Confirmed)
+                ->get();
+            $rejectedCount = Reservation::query()
+                ->where('product_id', $product->id)
+                ->where('status', ReservationStatus::Rejected)
+                ->count();
+
+            $confirmedQty = (int) $confirmed->sum('quantity');
+            $remainingValues = $confirmed->pluck('remaining_stock')->map(fn ($v) => (int) $v)->values();
+            $remainingUnique = $remainingValues->unique()->count() === $remainingValues->count();
+
+            $counts = [
+                'http_201' => 0,
+                'http_200' => 0,
+                'http_409' => 0,
+                'http_422' => 0,
+                'http_5xx' => 0,
+                'http_other' => 0,
             ];
-        }
+            foreach ($httpCodes as $code) {
+                match (true) {
+                    $code === 201 => $counts['http_201']++,
+                    $code === 200 => $counts['http_200']++,
+                    $code === 409 => $counts['http_409']++,
+                    $code === 422 => $counts['http_422']++,
+                    $code >= 500 => $counts['http_5xx']++,
+                    default => $counts['http_other']++,
+                };
+            }
 
-        $httpCodes = $this->fire($baseUrl, $payloads, $strategy, $raceDelay);
+            $oversold = $confirmedQty > $stock || ($stock - $product->stock) !== $confirmedQty;
 
-        // Estado final, leido con una conexion limpia (fuera de cualquier tx).
-        $product->refresh();
-        $confirmed = Reservation::query()
-            ->where('product_id', $product->id)
-            ->where('status', ReservationStatus::Confirmed)
-            ->get();
-        $rejectedCount = Reservation::query()
-            ->where('product_id', $product->id)
-            ->where('status', ReservationStatus::Rejected)
-            ->count();
+            $summary = [
+                'strategy' => $strategy,
+                'concurrency' => $concurrency,
+                'quantity_per_request' => $quantity,
+                'same_request_id' => $sameRequestId,
+                'product_id' => $product->id,
+                'stock_initial' => $stock,
+                'stock_final' => (int) $product->stock,
+                'stock_decremented' => $stock - (int) $product->stock,
+                'reservations_confirmed' => $confirmed->count(),
+                'reservations_rejected' => $rejectedCount,
+                'confirmed_quantity_sum' => $confirmedQty,
+                'remaining_stock_unique' => $remainingUnique,
+                'oversold' => $oversold,
+            ] + $counts;
 
-        $confirmedQty = (int) $confirmed->sum('quantity');
-        $remainingValues = $confirmed->pluck('remaining_stock')->map(fn ($v) => (int) $v)->values();
-        $remainingUnique = $remainingValues->unique()->count() === $remainingValues->count();
+            $checks = $this->option('assert') ? $this->checkInvariants($summary, $sameRequestId) : [];
+            $passed = ! in_array(false, $checks, true);
 
-        $counts = [
-            'http_201' => 0,
-            'http_200' => 0,
-            'http_409' => 0,
-            'http_422' => 0,
-            'http_5xx' => 0,
-            'http_other' => 0,
-        ];
-        foreach ($httpCodes as $code) {
-            match (true) {
-                $code === 201 => $counts['http_201']++,
-                $code === 200 => $counts['http_200']++,
-                $code === 409 => $counts['http_409']++,
-                $code === 422 => $counts['http_422']++,
-                $code >= 500 => $counts['http_5xx']++,
-                default => $counts['http_other']++,
-            };
-        }
+            if ($this->option('assert')) {
+                $summary['checks'] = $checks;
+                $summary['assert_passed'] = $passed;
+            }
 
-        $oversold = $confirmedQty > $stock || ($stock - $product->stock) !== $confirmedQty;
+            if ($json) {
+                // Solo JSON en stdout: nada mas, para que el llamante pueda parsearlo.
+                $this->output->writeln(json_encode($summary, JSON_PRETTY_PRINT));
+            } else {
+                $this->table(['metric', 'value'], collect($summary)->except('checks')->map(
+                    fn ($v, $k) => [$k, is_bool($v) ? ($v ? 'true' : 'false') : $v],
+                )->values());
 
-        $summary = [
-            'strategy' => $strategy,
-            'concurrency' => $concurrency,
-            'quantity_per_request' => $quantity,
-            'same_request_id' => $sameRequestId,
-            'product_id' => $product->id,
-            'stock_initial' => $stock,
-            'stock_final' => (int) $product->stock,
-            'stock_decremented' => $stock - (int) $product->stock,
-            'reservations_confirmed' => $confirmed->count(),
-            'reservations_rejected' => $rejectedCount,
-            'confirmed_quantity_sum' => $confirmedQty,
-            'remaining_stock_unique' => $remainingUnique,
-            'oversold' => $oversold,
-        ] + $counts;
+                foreach ($checks as $label => $ok) {
+                    $this->line(($ok ? '<info>PASS</info>' : '<error>FAIL</error>')." {$label}");
+                }
+            }
 
-        $checks = $this->option('assert') ? $this->checkInvariants($summary, $sameRequestId) : [];
-        $passed = ! in_array(false, $checks, true);
-
-        if ($this->option('assert')) {
-            $summary['checks'] = $checks;
-            $summary['assert_passed'] = $passed;
-        }
-
-        if ($json) {
-            // Solo JSON en stdout: nada mas, para que el llamante pueda parsearlo.
-            $this->output->writeln(json_encode($summary, JSON_PRETTY_PRINT));
-        } else {
-            $this->table(['metric', 'value'], collect($summary)->except('checks')->map(
-                fn ($v, $k) => [$k, is_bool($v) ? ($v ? 'true' : 'false') : $v],
-            )->values());
-
-            foreach ($checks as $label => $ok) {
-                $this->line(($ok ? '<info>PASS</info>' : '<error>FAIL</error>')." {$label}");
+            return $passed ? self::SUCCESS : self::FAILURE;
+        } finally {
+            // En finally a proposito: se ejecuta tambien si una asercion aborta,
+            // si el Process que invoca el comando expira o si CI cancela el job.
+            // Sin esto quedan productos y reservas de estres huerfanos en la BD
+            // de desarrollo (el arnes corre contra api-reservations, no la de test).
+            if (! $this->option('keep')) {
+                Reservation::query()->where('product_id', $product->id)->delete();
+                if ($createdProduct) {
+                    $product->delete();
+                }
             }
         }
-
-        if (! $this->option('keep')) {
-            Reservation::query()->where('product_id', $product->id)->delete();
-            if ($createdProduct) {
-                $product->delete();
-            }
-        }
-
-        return $passed ? self::SUCCESS : self::FAILURE;
     }
 
     /**

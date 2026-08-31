@@ -18,11 +18,19 @@ final class AtomicReservationService implements ReservationStrategy
             /*
              * attempts: 1 -- sin reintento, y es una decision, no un descuido:
              *
-             *  - Deadlock (1213) no puede ocurrir aqui: cada transaccion bloquea
-             *    una sola fila de `products` (por PK) y siempre en el mismo orden,
-             *    asi que no hay dos recursos que puedan cruzarse en un ciclo de
-             *    espera. Si algun dia entran reservas multi-linea habria que
-             *    bloquear las filas ordenadas por product_id y reconsiderar esto.
+             *  - Deadlock (1213): no se puede construir un ciclo de espera con
+             *    el esquema actual. Cada transaccion adquiere sus locks de un
+             *    solo golpe -- la unica espera bloqueante es el SELECT ... FOR
+             *    UPDATE inicial -- y despues solo escribe sobre la fila que ya
+             *    posee o sobre registros de indice nuevos; nunca vuelve a
+             *    esperar por un segundo recurso. (Ojo: si el producto NO existe,
+             *    el locking read no bloquea una fila por PK sino que toma un GAP
+             *    lock; los gap locks son mutuamente compatibles, asi que dos
+             *    404 concurrentes tampoco se cruzan.) Esto deja de valer si
+             *    entran reservas multi-linea, un alta de productos o un FOR
+             *    UPDATE sobre indice secundario: habria que ordenar los locks y
+             *    reconsiderar attempts. Como red, el handler HTTP mapea tambien
+             *    1213 -> 503 en vez de dejarlo salir como 500.
              *  - Lock wait timeout (1205) si puede darse (innodb_lock_wait_timeout
              *    esta fijado en 10s en el compose). Reintentar solo alargaria la
              *    espera de un cliente que ya lleva 10s bloqueado; preferimos
@@ -53,8 +61,12 @@ final class AtomicReservationService implements ReservationStrategy
                     // Escribimos el valor ya calculado (no `stock - quantity` en
                     // SQL): asi queda explicito que products.stock y
                     // reservations.remaining_stock salen del mismo numero.
+                    // saveOrFail: es la unica escritura que sostiene el invariante
+                    // de no-sobreventa; si no persiste, la transaccion revienta y
+                    // hace rollback en vez de crear una reserva confirmada sin
+                    // decremento.
                     $product->stock = $remaining;
-                    $product->save();
+                    $product->saveOrFail();
 
                     $status = ReservationStatus::Confirmed;
                 } else {

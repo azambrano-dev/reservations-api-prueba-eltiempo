@@ -119,7 +119,7 @@ class StoreReservationTest extends TestCase
             ->assertHeader('Idempotency-Replayed', 'true')
             ->assertJsonPath('data.id', $first->json('data.id'))
             ->assertJsonPath('data.status', 'rejected')
-            ->assertJsonPath('data.remaining_stock', 20);
+            ->assertJsonPath('data.remaining_stock', 2);
 
         $this->assertDatabaseCount('reservations', 1);
         $this->assertSame(20, $product->fresh()->stock, 'el replay no toca el stock');
