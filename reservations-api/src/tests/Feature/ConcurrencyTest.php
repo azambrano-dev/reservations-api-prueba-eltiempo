@@ -25,10 +25,10 @@ class ConcurrencyTest extends TestCase
     {
         parent::setUp();
 
-        $up = Process::timeout(5)->run('curl -s -o /dev/null -w "%{http_code}" '.self::BASE_URL.'/up');
+        $up = Process::timeout(5)->run('curl -s -o /dev/null -w "%{http_code}" ' . self::BASE_URL . '/up');
 
         if (trim($up->output()) !== '200') {
-            $this->markTestSkipped('nginx no accesible en '.self::BASE_URL.' (ejecutar dentro de docker compose)');
+            $this->markTestSkipped('nginx no accesible en ' . self::BASE_URL . ' (ejecutar dentro de docker compose)');
         }
     }
 
@@ -37,7 +37,7 @@ class ConcurrencyTest extends TestCase
      */
     private function stress(array $options): array
     {
-        $args = ['php', 'artisan', 'reservations:stress', '--json', '--assert', '--base-url='.self::BASE_URL];
+        $args = ['php', 'artisan', 'reservations:stress', '--json', '--assert', '--base-url=' . self::BASE_URL];
 
         foreach ($options as $key => $value) {
             $args[] = $value === true ? "--{$key}" : "--{$key}={$value}";
@@ -51,7 +51,7 @@ class ConcurrencyTest extends TestCase
             ->run($args);
 
         $json = json_decode($result->output(), true);
-        $this->assertIsArray($json, "salida no-JSON del comando:\n".$result->output().$result->errorOutput());
+        $this->assertIsArray($json, "salida no-JSON del comando:\n" . $result->output() . $result->errorOutput());
 
         return ['exit' => $result->exitCode(), 'summary' => $json, 'raw' => $result->output()];
     }
@@ -67,7 +67,7 @@ class ConcurrencyTest extends TestCase
 
         $s = $run['summary'];
 
-        $this->assertSame(0, $run['exit'], "invariantes violadas:\n".$run['raw']);
+        $this->assertSame(0, $run['exit'], "invariantes violadas:\n" . $run['raw']);
         $this->assertFalse($s['oversold']);
         $this->assertSame(0, $s['http_5xx']);
         $this->assertSame(10, $s['reservations_confirmed']);
@@ -93,8 +93,8 @@ class ConcurrencyTest extends TestCase
         $this->assertSame(0, $run['exit'], $run['raw']);
         $this->assertSame(1, $s['reservations_confirmed'] + $s['reservations_rejected']);
         $this->assertSame(1, $s['stock_decremented']);
-        $this->assertSame(1, $s['http_201']);
-        $this->assertSame(24, $s['http_200']);
+        $this->assertSame(1, $s['http_201'], 'exactamente una peticion crea la reserva');
+        $this->assertSame(25, $s['http_200'] + $s['http_201'], 'el resto son replays de la misma reserva');
         $this->assertSame(0, $s['http_5xx']);
     }
 

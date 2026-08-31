@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 
-RUN docker-php-ext-install -j"$(nproc)" pdo_mysql zip
+RUN docker-php-ext-install -j"$(nproc)" pdo_mysql zip pcntl
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 

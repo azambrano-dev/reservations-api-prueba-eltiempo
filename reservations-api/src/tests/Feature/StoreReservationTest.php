@@ -100,6 +100,31 @@ class StoreReservationTest extends TestCase
         $this->assertSame($stockAfterFirst, $product->fresh()->stock, 'el replay no vuelve a mover stock');
     }
 
+    public function test_replay_rejected_reservation_stays_rejected_and_stock_intact(): void
+    {
+        $product = Product::factory()->withStock(2)->create();
+        $payload = ['request_id' => 'req-replay-rejected', 'product_id' => $product->id, 'quantity' => 5];
+
+        $first = $this->reserve($payload)
+            ->assertStatus(409)
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.remaining_stock', 2);
+
+        // Acá repongo el stock para que el replay pueda ser confirmado si no se maneja correctamente la idempotencia.
+        // Si la implementación reevalua en el replay, confirmaría la reserva, movería stock y el test ser caería aquí.
+        $product->update(['stock' => 20]);
+
+        $this->reserve($payload)
+            ->assertStatus(409)
+            ->assertHeader('Idempotency-Replayed', 'true')
+            ->assertJsonPath('data.id', $first->json('data.id'))
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.remaining_stock', 20);
+
+        $this->assertDatabaseCount('reservations', 1);
+        $this->assertSame(20, $product->fresh()->stock, 'el replay no toca el stock');
+    }
+
     public function test_same_request_id_with_different_payload_conflicts(): void
     {
         $product = Product::factory()->withStock(10)->create();
