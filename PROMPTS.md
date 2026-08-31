@@ -4,8 +4,6 @@ De acuerdo con el requisito de uso de IA, la siguiente prueba se realizo usando 
 
 Los promts van tal cual los ecribí en Claude. No copiaré las respuesta completas solo los puntos importantes y decisiones que tome sobre estos.
 
-claude --resume ecc8f695-8a88-415b-8877-6dabfd9c3c7c
-
 ## Promt Inicial
 
 ```bash
