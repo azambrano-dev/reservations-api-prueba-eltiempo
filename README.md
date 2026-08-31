@@ -77,7 +77,7 @@ docker compose exec api_reservations php artisan test
 
 # escenario del punto 7: stock 1, dos solicitudes de 1 unidad
 docker compose exec api_reservations php raceDemo.php
-docker compose exec api_reservations php raceDemo.php --implementation=naive --delay=50
+docker compose exec api_reservations php raceDemo.php --implementation=naive --delay=50 --workers=10
 ```
 
 Hay dos opciones de test de concurrencia a propósito. `raceDemo.php` *(implementada manualmente)* llama al servicio directamente con `pcntl_fork`, sin pasar por HTTP, así que si falla el problema está en el servicio y en ningún otro sitio. `ConcurrencyTest` lanza peticiones reales contra nginx y verifica que el camino completo aguanta lo mismo.
