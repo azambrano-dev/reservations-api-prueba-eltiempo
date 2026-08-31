@@ -35,9 +35,6 @@ $stock = (int) ($options['stock'] ?? 1);
 $delay = (int) ($options['delay'] ?? 0);
 $workers = (int) ($options['workers'] ?? 1);
 
-// Asignamos el delay a la configuración de la aplicación para que sea accesible en el servicio de reservas
-config([ 'reservations.race_delay_ms' => $delay ]);
-
 // Limpiamos la tabla de reservas antes de la demo y agregamos stock al producto de prueba
 DB::table('reservations')->delete();
 DB::table('products')->updateOrInsert(
@@ -62,7 +59,7 @@ for ( $i = 0; $i < $workers; $i++ )
     DB::purge();
     DB::reconnect();
 
-    $service = app( $implementation === 'naive' ? NaiveReservationService::class : AtomicReservationService::class );
+    $service = $implementation === 'naive' ? app(NaiveReservationService::class, ['raceDelayMs' => $delay]) : app(AtomicReservationService::class);
 
     // Esperamos hasta el tiempo de inicio para que todos los workers se ejecuten al mismo tiempo
     while ( hrtime(true) < $startTime );
