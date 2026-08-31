@@ -96,7 +96,7 @@ for ( $i = 0; $i < $workers; $i++ ) {
     unlink("/tmp/race_demo_worker_{$i}.json");
 
     printf(
-        "Worker %d: Request ID: %s, Status: %s, Remaining Stock: %s\n",
+        "\nReserva Rechaza: Worker %d: Request ID: %s, Status: %s, Remaining Stock: %s\n",
         $output['worker'],
         $output['request_id'],
         $output['status'],
